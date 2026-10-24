@@ -15,14 +15,17 @@ from utils import base_url_host_matches
 logger = logging.getLogger(__name__)
 
 
+def fallback_entry_key(fb: dict) -> tuple[str, str, str]:
+    return (str(fb.get("provider") or "").strip().lower(), str(fb.get("model") or "").strip(),
+            str(fb.get("base_url") or "").strip().rstrip("/"))
+
+
 def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: str) -> Optional[tuple[str, str]]:
     """Swap ``agent`` onto ``entry`` (a fallback-chain-shaped dict). Returns ``(old_model,
     old_provider)``, or None when the provider has no usable client. Sets ``_fallback_activated``
     so the next turn's ``restore_primary_runtime`` reverts it; raises on a failed swap."""
-    from hermes_cli.route_pin import provider_pins_route
-
-    if provider_pins_route(agent.provider):
-        raise ValueError("Pinned provider requires an explicit operator model/provider switch")
+    from agent.delegation_fallback import check_bind, check_resolved, finish_bind
+    check_bind(agent, entry, provider, model)
     from agent.auxiliary_client import resolve_provider_client
     from agent.chat_completion_helpers import (
         _fallback_api_mode_resolved, _rebind_fallback_credential_pool,
@@ -33,6 +36,10 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
     # of falling through to OpenRouter defaults.
     base_url_hint = (entry.get("base_url") or "").strip() or None
     api_key_hint = resolve_entry_api_key(entry)
+    from agent.delegation_fallback import ModelMapPolicy, resolution_credentials
+    policy = getattr(agent, "_model_map_policy", None)
+    if isinstance(policy, ModelMapPolicy):
+        base_url_hint, api_key_hint = resolution_credentials(policy, agent._fallback_index)
     api_mode_explicit, api_mode = _fallback_api_mode_hint(entry, provider, base_url_hint)
     # Ollama Cloud: OLLAMA_API_KEY from env when the entry has no key. Host match, not
     # substring — GHSA-76xc-57q6-vm5m.
@@ -45,6 +52,7 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
         api_mode=api_mode)
     if client is None:
         return None
+    check_resolved(agent, entry, client, _resolved_model, model, provider)
     if provider == "moa":
         # A MoA entry means the preset itself, exactly like ``provider: moa`` in config. The client
         # is the preset's aggregator and only proves the preset resolves; bind the facade with the
@@ -63,6 +71,7 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
         elif not api_mode_explicit and api_mode == "chat_completions":
             api_mode = _fallback_api_mode_resolved(agent, provider, model, base_url)
 
+    check_resolved(agent, entry, client, model, entry.get("model", model), provider)
     old_model, old_provider, old_base_url = agent.model, agent.provider, agent.base_url
     # Clear the per-config context_length override so the new model's own context window is
     # resolved instead of the previous model's stale value (#22387).
@@ -94,6 +103,7 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
     _update_fallback_context_compressor(agent)
     _reresolve_fallback_reasoning_config(agent)
     _rescope_fallback_extra_body(agent, old_model, old_provider, old_base_url)
+    finish_bind(agent, entry)
     return old_model, old_provider
 
 

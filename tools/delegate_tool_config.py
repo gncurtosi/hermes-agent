@@ -234,7 +234,7 @@ def _pool_serves_endpoint(pool: Any, provider: Optional[str], base_url: Optional
 
 def _resolve_child_credential_pool(
     effective_provider: Optional[str], parent_agent, effective_base_url: Optional[str] = None,
-    effective_requested_provider: Optional[str] = None,
+    effective_requested_provider: Optional[str] = None, routing_cfg: Optional[dict] = None,
 ):
     """Credential pool for the child: parent's pool (same provider), that provider's own pool, or None (child keeps
     its fixed credential). Custom endpoints all collapse to ``provider="custom"``, so they are matched by endpoint
@@ -252,6 +252,9 @@ def _resolve_child_credential_pool(
     ``requested_provider`` identity takes precedence over URL-only matching (#45763): the child must not
     lease the first pool registered for the shared endpoint.
     """
+    from agent.delegation_fallback import ModelMapPolicy
+    if isinstance((routing_cfg or {}).get("_model_map_policy"), ModelMapPolicy):
+        return None
     parent_pool = getattr(parent_agent, "_credential_pool", None)
     if not effective_provider:
         return parent_pool
@@ -428,6 +431,12 @@ def _resolve_delegation_credentials(cfg: dict, parent_agent) -> dict:
     ``provider`` set → full bundle via the runtime provider system (same path as CLI/gateway startup); neither →
     None values, child inherits everything. ``request_overrides`` is honored on every branch. Raises ValueError
     with a user-facing message."""
+    from agent.delegation_fallback import ModelMapPolicy, resolution_credentials
+    policy = cfg.get("_model_map_policy")
+    if isinstance(policy, ModelMapPolicy) and cfg.get("provider") in {"openai-codex", "anthropic"}:
+        endpoint, credential = resolution_credentials(policy, 0)
+        mode = "codex_responses" if cfg["provider"] == "openai-codex" else "anthropic_messages"
+        return _credential_bundle(cfg["model"], cfg["provider"], endpoint, credential, cfg.get("api_mode") or mode, {})
     values = {k: str(cfg.get(k) or "").strip() or None for k in ("model", "provider", "base_url", "api_key")}
     values["api_mode"] = str(cfg.get("api_mode") or "").strip().lower() or None
     explicit_request_overrides = cfg.get("request_overrides") if isinstance(cfg.get("request_overrides"), dict) else None
@@ -482,10 +491,11 @@ def _resolve_child_fallback_chain(parent_agent, routing_cfg: Any, pinned: bool) 
     disables fallback either way. Malformed entries are dropped by the canonical normalizer.
     Same rule as a pinned cron job (``cron/scheduler.py::_job_fallback_chain``).
     """
-    return scoped_fallback_chain(
+    from agent.delegation_fallback import child_fallback_envelope
+    return child_fallback_envelope(scoped_fallback_chain(
         getattr(parent_agent, "_fallback_chain", None),
         routing_cfg.get("fallback_providers") if isinstance(routing_cfg, dict) else None,
-        pinned=pinned, owner="delegation")
+        pinned=pinned, owner="delegation"), routing_cfg)
 
 
 class ResolvedReasoning(NamedTuple):

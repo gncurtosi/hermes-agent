@@ -44,7 +44,9 @@ class TaskRoute:
         """The ``route`` a backend-routed task's result carries (None for the default backend's unlabelled route)."""
         if self.backend == "default" and not self.label:
             return None
-        return {"backend": self.backend, **({"label": self.label} if self.label else {})}
+        from agent.delegation_fallback import caller_report
+        return {"backend": self.backend, **({"label": self.label} if self.label else {}),
+                **caller_report(self.routing_cfg)}
 
     def refused_entry(self, index: int) -> dict[str, Any]:
         """Result entry for a task this route refused: no child was built for it."""
@@ -243,7 +245,9 @@ def _resolve_route(route: dict[str, Any], parent_agent: Any, backend: str) -> Ta
 
 def _route_to_task_route(route: dict[str, Any], parent_agent: Any, cache: dict[str, TaskRoute],
                          config: Optional[Mapping[str, Any]] = None, backend: str = "default") -> TaskRoute:
+    from agent.delegation_fallback import prepare_model_map_route
     label = route.get("label") if isinstance(route.get("label"), str) else None
+    route = prepare_model_map_route(route, config or {}, backend, parent_agent)
     route = _with_inherited_fallback(route, config or {})
     # The label is display-only: two labels on one route (or one profile) resolve once.
     key = json.dumps({k: v for k, v in route.items() if k != "label"}, sort_keys=True, default=str)

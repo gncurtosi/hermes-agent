@@ -319,6 +319,7 @@ def _build_child_agent(
         child_pool = _resolve_child_credential_pool(
             rt["provider"], None if profile_home is not None else parent_agent, rt["base_url"],
             effective_requested_provider=rt.get("requested_provider"),
+            routing_cfg=routing_cfg,
         )
     child._print_fn = getattr(parent_agent, "_print_fn", None)
     _apply_child_cache_ttl(child)
@@ -345,6 +346,8 @@ def _build_child_agent(
     if child_pool is not None:
         child._credential_pool = child_pool
 
+    from agent.delegation_fallback import inherit_task_contributors
+    inherit_task_contributors(child, routing_cfg, parent_agent)
     _attach_child(parent_agent, child)  # interrupt propagation
     # spawn_requested now — the child may queue for seconds when the pool is
     # saturated — then the subagent_start lifecycle hook.
@@ -422,6 +425,8 @@ def _run_single_child(
             preview=str(exc), summary=str(exc), status="failed",
         )
     finally:
+        from agent.delegation_fallback import record_child_contributors
+        record_child_contributors(parent_agent, child)
         run.cleanup(heartbeat=heartbeat, child_pool=child_pool, leased_cred_id=leased_cred_id, close_deferred=_child_close_deferred)
 
 

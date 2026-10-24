@@ -1299,6 +1299,8 @@ def _reasoning_config_for_wire(agent):
     session: the request goes out without a reasoning config and the route
     applies its own default.
     """
+    from agent.delegation_fallback import check_reasoning
+    check_reasoning(agent)
     cfg = agent.reasoning_config
     ephemeral_off = _consume_ephemeral_reasoning_off(agent)
     if getattr(agent, "_reasoning_effort_rejected", False):
@@ -1747,8 +1749,9 @@ def rewrite_prompt_model_identity(agent, model: str, provider: str) -> None:
     Not persisted: the stored row keeps the primary's labels so a restored primary replays a
     byte-identical prompt (prefix cache intact). Only the LAST occurrence of each line is touched —
     earlier matches may be user content (memory snapshots, context files)."""
+    from agent.delegation_fallback import ModelMapPolicy
     sp = getattr(agent, "_cached_system_prompt", None)
-    if not isinstance(sp, str) or not sp:
+    if not isinstance(sp, str) or not sp or isinstance(getattr(agent, "_model_map_policy", None), ModelMapPolicy):
         return
     for label, value in (("Model", model), ("Provider", provider)):
         if not value:
@@ -1759,10 +1762,6 @@ def rewrite_prompt_model_identity(agent, model: str, provider: str) -> None:
             sp = f"{sp[:last.start()]}{label}: {value}{sp[last.end():]}"
     agent._cached_system_prompt = sp
 
-
-def _fallback_entry_key(fb: dict) -> tuple[str, str, str]:
-    return (str(fb.get("provider") or "").strip().lower(), str(fb.get("model") or "").strip(),
-            str(fb.get("base_url") or "").strip().rstrip("/"))
 
 
 def _fallback_entry_unavailable_without_network(agent, fb: dict) -> Optional[str]:
@@ -2033,11 +2032,10 @@ def try_activate_fallback(agent, reason: FailoverReason | None = None, reset_at=
     model slug and provider in place so the retry loop continues on the new backend; client
     construction goes through resolve_provider_client (no duplicated provider→key mappings)."""
     from agent.fallback_cooldown import _arm_rate_limit_cooldown, switch_deferred_by_reset
-    from hermes_cli.route_pin import provider_pins_route
+    from agent.route_binding import fallback_entry_key
+    from agent.delegation_fallback import fallback_blocked, fallback_allowed
 
-    if provider_pins_route(agent.provider):
-        agent._fallback_chain = []
-        agent._fallback_model = None
+    if fallback_blocked(agent, reason) or not fallback_allowed(agent, reason):
         return False
     if switch_deferred_by_reset(agent, reason, reset_at):
         return False
@@ -2047,7 +2045,7 @@ def try_activate_fallback(agent, reason: FailoverReason | None = None, reset_at=
             return _fallback_chain_exhausted(agent, reason)
         fb = agent._fallback_chain[agent._fallback_index]
         agent._fallback_index += 1
-        fb_key = _fallback_entry_key(fb)
+        fb_key = fallback_entry_key(fb)
         if getattr(agent, "_unavailable_fallback_keys", None) is None:
             agent._unavailable_fallback_keys = set()
         unavailable = agent._unavailable_fallback_keys
@@ -2092,6 +2090,9 @@ def try_activate_fallback(agent, reason: FailoverReason | None = None, reset_at=
             if fb_provider == "nous":
                 unavailable.add(fb_key)
             logger.error("Failed to activate fallback %s: %s", fb_model, e)
+            from agent.delegation_fallback import AccountBindingError
+            if isinstance(e, AccountBindingError):
+                return False
             continue  # try next in chain
 
 
