@@ -448,6 +448,16 @@ def build_policy(params, config, *, private_secrets=None, profile_terminal=True,
     validate_editor(source, params.get('editor'))
     launch_skills(params)
     config = present_sections(json.loads(json.dumps(config)))
+    from hermes_cli.route_pin import validate_selection
+
+    pick = _without_auto_pick(params)
+    block = config.get('model') or {}
+    try:
+        validate_selection(pick.get('provider') or block.get('provider'),
+                           pick.get('model') if pick.get('provider') else pick.get('model') or block.get('default'),
+                           pick.get('base_url'))
+    except (RuntimeError, ValueError) as error:
+        _refuse('model', str(error))
     picked_route = {'model', 'provider', 'base_url'} & set(_without_auto_pick(params))
     if params.get('follow_profile_config') is True and picked_route:
         # Any explicit route pick (a model, a provider, an endpoint) records its provenance before the

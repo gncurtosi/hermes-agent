@@ -126,6 +126,9 @@ class ProviderProfile:
     # fallback_models: curated list shown in /model picker when live fetch fails.
     # Only agentic models that support tool calling should appear here.
     fallback_models: tuple = ()
+    # Opt-in policies: exact catalog selection and no automatic route/account substitution.
+    strict_catalog: bool = field(default=False, kw_only=True)
+    explicit_route_only: bool = field(default=False, kw_only=True)
     # model_aliases: short name -> id in fallback_models, for providers whose catalog is not
     # in models.dev (external processes); `/model <alias>` resolves here before core guessing.
     model_aliases: dict = field(default_factory=dict)
@@ -355,6 +358,10 @@ class ProviderProfile:
         """External-process providers: ``{available, logged_in, plan, detail, login_command}`` from the
         CLI itself so setup can gate on login. ``None`` = nothing to report beyond executable presence."""
         return None
+
+    def declared_models(self) -> list[str]:
+        """Exact selectable IDs; account-scoped providers override with a validated cache."""
+        return list(self.fallback_models)
 
     def discover_models(self, **kwargs: Any) -> list[dict[str, Any]] | None:
         """External-process providers: the account's live picker as ``[{id, label, note}]`` without

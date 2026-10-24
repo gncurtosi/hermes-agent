@@ -388,7 +388,8 @@ def test_no_unavailable_warning_when_configured_fallback_chain_resolves():
 
     assert messages == []
     assert agent._compression_warning is None
-    mock_fallback.assert_called_once_with("compression", "ollama-cloud")
+    mock_fallback.assert_called_once_with(
+        "compression", "ollama-cloud", main_runtime=agent._current_main_runtime())
     mock_ctx_len.assert_called_once()
     assert mock_ctx_len.call_args.args == ("gpt-5.4-mini",)
     assert mock_ctx_len.call_args.kwargs["provider"] == "openai-codex"

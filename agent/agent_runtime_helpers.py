@@ -1013,6 +1013,10 @@ def recover_with_credential_pool(
     Rate limits: retry once, then rotate. Billing: rotate immediately. Auth: refresh before
     rotating. ``classified_reason`` beats raw HTTP codes (e.g. Anthropic 400 "out of extra
     usage"); ``billing_unverified`` gives the entry a short cooldown, not the one-hour bench."""
+    from hermes_cli.route_pin import provider_pins_route
+
+    if provider_pins_route(agent.provider):
+        return False, has_retried_429
     pool = agent._credential_pool
     if pool is None:
         return False, has_retried_429
@@ -1186,6 +1190,10 @@ def try_recover_primary_transport(
 ) -> bool:
     """Rebuild the primary client once and retry after ``max_retries`` exhaust on a transient
     transport error. Skipped for aggregators (OpenRouter, Nous) that manage retries server-side."""
+    from hermes_cli.route_pin import provider_pins_route
+
+    if provider_pins_route(agent.provider):
+        return False
     error_type = type(api_error).__name__
     if agent._fallback_activated or error_type not in _TRANSIENT_TRANSPORT_ERRORS or agent._is_openrouter_url():
         return False
@@ -1886,38 +1894,6 @@ def anthropic_prompt_cache_policy(
     return False, False
 
 
-def _provider_supplied_client(agent, client_kwargs: dict) -> Any | None:
-    """Ask the registered ProviderProfile for a custom client, if any. Resolves by provider name,
-    then by ``base_url`` prefix so a URL-only runtime (``acp://…``) still reaches its profile.
-    A profile that raises is logged and skipped: a third-party plugin must not be able to take
-    the turn down, it can only fail to provide a client."""
-    try:
-        from providers import get_provider_profile
-    except Exception:
-        return None
-    profile = None
-    provider_name = (getattr(agent, "provider", "") or "").strip()
-    if provider_name:
-        try:
-            profile = get_provider_profile(provider_name)
-        except Exception:
-            profile = None
-    if profile is None:
-        base_url = str(client_kwargs.get("base_url", "") or "").strip()
-        if base_url:
-            profile = _profile_for_base_url(base_url)
-    if profile is None:
-        return None
-    try:
-        return profile.create_client(**client_kwargs)
-    except Exception:
-        _ra().logger.warning(
-            "Provider profile %r failed to create a client; falling back to the standard client path",
-            getattr(profile, "name", provider_name) or "?", exc_info=True,
-        )
-        return None
-
-
 def _profile_for_base_url(base_url: str) -> Any | None:
     """Registered profile whose own base_url is a prefix of ``base_url`` (provider name did not
     resolve). Prefix, not equality: the replaced copilot-acp branch keyed on
@@ -2025,6 +2001,7 @@ def create_openai_client(agent, client_kwargs: dict, *, reason: str, shared: boo
     # before the built-in ladder so a profile registered from ~/.hermes/plugins/ or a pip entry
     # point can ship a transport without editing this function (what makes an out-of-tree ACP
     # provider possible). None (the default) falls through, so existing providers are unaffected.
+    from agent.provider_client_factory import _provider_supplied_client
     provider_client = _provider_supplied_client(agent, client_kwargs)
     if provider_client is not None:
         _ra().logger.info(
@@ -2396,6 +2373,10 @@ def _finish_switch(agent, new_provider, old_norm, new_norm) -> None:
             if (entry.get("provider") or "").strip().lower() not in {old_norm, new_norm}
         ]
     agent._fallback_chain = fallback_chain
+    from hermes_cli.route_pin import provider_pins_route
+
+    if provider_pins_route(new_provider):
+        agent._fallback_chain = fallback_chain = []
     agent._fallback_model = fallback_chain[0] if fallback_chain else None
     # Apply the switched-to provider's request_overrides (custom_providers extra_body).
     try:
@@ -2440,6 +2421,9 @@ def switch_model(
     api_mode, base_url, destination_capabilities = _resolve_switch_destination(
         agent, new_model, new_provider, base_url, api_mode, capabilities, old_norm, new_norm
     )
+    from hermes_cli.route_pin import validate_selection
+
+    validate_selection(new_provider, new_model, base_url)
     snapshot = _snapshot_switch_state(agent)
     try:
         _swap_switch_runtime(

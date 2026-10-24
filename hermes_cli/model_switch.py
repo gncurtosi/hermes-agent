@@ -757,6 +757,10 @@ def resolve_alias(raw_input: str, current_provider: str, user_providers: Optiona
     matched against the provider's models.dev catalog by ``vendor/family`` prefix (``family``
     for non-aggregators). Returns ``(provider, resolved_model_id, alias_name)`` or None; raises
     :class:`AmbiguousAliasError` when several catalog models match."""
+    if _strict_catalog_provider(current_provider):
+        catalog, _ = _external_process_catalog(current_provider)
+        exact = raw_input.strip()
+        return (current_provider, exact, exact) if exact in catalog else None
     key = raw_input.strip().lower()
 
     _ensure_direct_aliases()
@@ -821,13 +825,20 @@ def resolve_alias(raw_input: str, current_provider: str, user_providers: Optiona
     return (current_provider, matches[0], key)
 
 
+def _strict_catalog_provider(provider: str) -> bool:
+    from hermes_cli.route_pin import policy_profile
+
+    profile = policy_profile(provider)
+    return profile is not None and profile.strict_catalog
+
+
 def _external_process_catalog(provider: str) -> tuple[list[str], dict[str, str]]:
     """``(declared model ids, own aliases)`` of an ``external_process`` profile, else empty."""
     from providers import get_provider_profile
     profile = get_provider_profile(provider)
     if profile is None or profile.auth_type != "external_process":
         return [], {}
-    return list(profile.fallback_models), {k.lower(): v for k, v in profile.model_aliases.items()}
+    return list(profile.declared_models()), {k.lower(): v for k, v in profile.model_aliases.items()}
 
 
 def _external_process_match(catalog: list[str], aliases: dict[str, str], typed: str, *, provider: str) -> str | None:
@@ -1233,6 +1244,10 @@ def _route_explicit_provider(st: _Switch) -> Optional[ModelSwitchResult]:
         return st.fail(_unknown_provider_message(st.explicit_provider))
 
     st.target_provider, st.provider_label = pdef.id, pdef.name  # label is re-derived in the credential step
+    if _strict_catalog_provider(st.target_provider):
+        from hermes_cli.model_switch_strict import route_strict_model_input
+
+        return route_strict_model_input(st)
     if st.target_provider == "moa" and not st.new_model:
         st.new_model = _moa_default_preset()
 
@@ -1355,6 +1370,10 @@ def _route_from_model_input(st: _Switch) -> Optional[ModelSwitchResult]:
     fallback (b) or ``vendor:model`` conversion (c) -> aggregator catalog search (d) ->
     configured-provider match (d.5) -> detect_provider_for_model() as last resort (e)."""
     from hermes_cli.models import detect_provider_for_model
+    if _strict_catalog_provider(st.current_provider):
+        from hermes_cli.model_switch_strict import route_strict_model_input
+
+        return route_strict_model_input(st)
     raw_input, current_provider = st.raw_input, st.current_provider
     try:
         from hermes_cli.config import load_config
@@ -1589,7 +1608,7 @@ def _resolve_switch_credentials(st: _Switch) -> Optional[ModelSwitchResult]:
         _creds_for_current_provider(st)
 
     # Direct alias override: use the alias's exact base_url if set.
-    if st.resolved_alias:
+    if st.resolved_alias and not _strict_catalog_provider(st.target_provider):
         _ensure_direct_aliases()
         da = DIRECT_ALIASES.get(st.resolved_alias)
         if da is not None and da.base_url:

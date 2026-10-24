@@ -3709,12 +3709,13 @@ def _recoverable_pool_provider(
     return None
 
 
-def _recover_provider_pool(provider: str, exc: Exception, *, failed_api_key: str = "") -> bool:
-    """Try same-provider credential-pool recovery for auxiliary calls.
-
-    ``failed_api_key`` lets mark_exhausted_and_rotate identify the right pool entry even if
-    another process already rotated (current() would be None).
-    """
+def _recover_provider_pool(
+    provider: str, exc: Exception, *, failed_api_key: str = "", main_runtime: Optional[dict[str, Any]] = None,
+) -> bool:
+    """Recover an unpinned pool; failed_api_key identifies its credential across concurrent rotation."""
+    from agent.auxiliary_route_pin import recovery_pins_route
+    if recovery_pins_route(provider, main_runtime=main_runtime):
+        return False
     normalized = _normalize_aux_provider(provider)
     try:
         pool = pool_for_aux_provider(provider, normalized, load_pool)
@@ -4238,6 +4239,9 @@ def _try_payment_fallback(
 ) -> tuple[Optional[Any], Optional[str], str]:
     """Try the auto-detection chain after a payment/credit or connection error, skipping the failed
     provider (and the main-provider path when it maps to the same backend). Returns (client, model, label) or (None, None, "")."""
+    from agent.auxiliary_route_pin import recovery_pins_route
+    if recovery_pins_route(failed_provider, main_runtime=main_runtime):
+        return None, None, ""
     skip = failed_provider.lower().strip()
     # The SESSION's provider decides whether discovery is allowed: a live `/model xai-oauth` session
     # over a persisted ``provider: auto`` is a selection, so the disk value alone is not the answer.
@@ -4294,18 +4298,24 @@ def _failed_backend_skip(
 def _try_main_agent_model_fallback(
     failed_provider: str, task: str | None = None, reason: str = "error",
     failed_model: Optional[str] = None, failed_base_url: str = "", failure_scope: Any = None,
+    main_runtime: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[Any], Optional[str], str]:
     """Last-resort fallback to the main agent provider + model after the configured chain is exhausted.
     ``failed_model`` scoping per ``_failed_backend_skip``; same-URL custom endpoints serve many models,
     so a hung aux model says nothing about the main model's health. Returns (client, model, label) or (None, None, "")."""
-    main_provider = (_read_main_provider() or "").strip()
-    main_model = (_read_main_model() or "").strip()
+    from agent.auxiliary_route_pin import recovery_pins_route
+    if recovery_pins_route(failed_provider, main_runtime=main_runtime):
+        return None, None, ""
+    runtime = _normalize_main_runtime(main_runtime)
+    main_provider = str(runtime.get("provider") or ("" if main_runtime is not None else _read_main_provider())).strip()
+    main_model = str(runtime.get("model") or ("" if main_runtime is not None else _read_main_model())).strip()
     if main_provider.lower() == "moa":
         # MoA virtual provider: fall back to the preset's aggregator (the acting model).
         _agg_provider, _agg_model = _resolve_moa_aggregator(main_model)
         if not _agg_provider or not _agg_model:
             return None, None, ""
         main_provider, main_model = _agg_provider, _agg_model
+        runtime = dict(runtime, base_url="", api_key="", api_mode="")
     if not main_provider or not main_model or main_provider.lower() in {"auto", ""}:
         return None, None, ""
     if task == "vision" and (
@@ -4315,7 +4325,7 @@ def _try_main_agent_model_fallback(
         logger.info("Auxiliary vision: %s on %s — main agent provider %s accepts no image input, not falling back",
                     reason, failed_provider, main_provider)
         return None, None, ""
-    main_base_url = _custom_health_base_url(main_provider)
+    main_base_url = _custom_health_base_url(main_provider, runtime.get("base_url"))
     if _failed_backend_skip(
             failed_provider, failed_model, failed_base_url=failed_base_url,
             failure_scope=failure_scope)(main_provider, main_model, main_base_url):
@@ -4324,7 +4334,10 @@ def _try_main_agent_model_fallback(
         _log_skip_unhealthy(main_provider, task, base_url=main_base_url)
         return None, None, ""
     try:
-        client, resolved_model = resolve_provider_client(provider=main_provider, model=main_model)
+        client, resolved_model = resolve_provider_client(
+            provider=main_provider, model=main_model, main_runtime=runtime,
+            explicit_base_url=runtime.get("base_url"), explicit_api_key=runtime.get("api_key"),
+            api_mode=runtime.get("api_mode"))
     except Exception:
         client, resolved_model = None, None
     if client is None:
@@ -4389,12 +4402,13 @@ def _context_too_small(
 
 def _try_configured_fallback_chain(
     task: str, failed_provider: str, reason: str = "error", failed_model: Optional[str] = None, *,
-    failed_base_url: str = "", failure_scope: Any = None,
+    failed_base_url: str = "", failure_scope: Any = None, main_runtime: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[Any], Optional[str], str]:
     """Try auxiliary.<task>.fallback_chain entries in order (each needs ``provider``; model/base_url/api_key optional).
     ``failed_model`` scoping per ``_failed_backend_skip`` (sibling models on the same provider still
     run after a model-scoped failure). Returns (client, model, provider_label) or (None, None, "")."""
-    if not task:
+    from agent.auxiliary_route_pin import recovery_pins_route
+    if not task or recovery_pins_route(failed_provider, main_runtime=main_runtime):
         return None, None, ""
     chain = _get_auxiliary_task_config(task).get("fallback_chain")
     if not chain or not isinstance(chain, list):
@@ -4420,7 +4434,7 @@ def _try_configured_fallback_chain(
         fb_model = fb_model_raw or None
         label = f"fallback_chain[{i}]({fb_provider})"
         try:
-            fb_client, resolved_model = _resolve_fallback_entry(entry)
+            fb_client, resolved_model = _resolve_fallback_entry(entry, main_runtime=main_runtime)
         except Exception:
             fb_client, resolved_model = None, None
         if fb_client is not None:
@@ -4440,14 +4454,15 @@ def _try_configured_fallback_chain(
 
 
 def _try_configured_fallback_for_unavailable_client(
-    task: Optional[str], failed_provider: str
+    task: Optional[str], failed_provider: str, *, main_runtime: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[Any], Optional[str], str]:
     """Task fallback_chain when an explicit aux provider cannot build a client (no key/OAuth/pool creds);
     stops at the per-task chain — the main-agent model stays the runtime last resort."""
     explicit = (failed_provider or "").strip().lower()
     if not task or not explicit or explicit in {"auto"}:
         return None, None, ""
-    return _try_configured_fallback_chain(task, explicit, reason="provider unavailable")
+    return _try_configured_fallback_chain(
+        task, explicit, reason="provider unavailable", main_runtime=main_runtime)
 
 
 def _fallback_entry_api_key(entry: dict[str, Any]) -> Optional[str]:
@@ -4456,7 +4471,9 @@ def _fallback_entry_api_key(entry: dict[str, Any]) -> Optional[str]:
     return resolve_entry_api_key(entry)
 
 
-def _resolve_fallback_entry(entry: dict[str, Any]) -> tuple[Optional[Any], Optional[str]]:
+def _resolve_fallback_entry(
+    entry: dict[str, Any], *, main_runtime: Optional[dict[str, Any]] = None,
+) -> tuple[Optional[Any], Optional[str]]:
     """Resolve one fallback entry through the central provider router."""
     provider = str(entry.get("provider") or "").strip()
     model = str(entry.get("model") or "").strip() or None
@@ -4466,6 +4483,7 @@ def _resolve_fallback_entry(entry: dict[str, Any]) -> tuple[Optional[Any], Optio
         provider, model=model, explicit_base_url=str(entry.get("base_url") or "").strip() or None,
         explicit_api_key=_fallback_entry_api_key(entry),
         api_mode=str(entry.get("api_mode") or entry.get("transport") or "").strip() or None,
+        main_runtime=main_runtime,
     )
     if client is not None:
         with contextlib.suppress(Exception):
@@ -4476,10 +4494,12 @@ def _resolve_fallback_entry(entry: dict[str, Any]) -> tuple[Optional[Any], Optio
 def _try_main_fallback_chain(
     task: Optional[str], failed_provider: str = "", reason: str = "error", *,
     failed_model: Optional[str] = None, failed_base_url: str = "", failure_scope: Any = None,
+    main_runtime: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[Any], Optional[str], str]:
-    """Top-level main-agent fallback chain for a ``provider: auto`` auxiliary call: auto tasks honour the
-    user's main fallback policy before the built-in discovery chain; read via ``get_fallback_chain`` so
-    ``fallback_providers`` and legacy ``fallback_model`` keep the main agent's order."""
+    """Resolve the configured main fallback order only for an unpinned auxiliary request."""
+    from agent.auxiliary_route_pin import recovery_pins_route
+    if recovery_pins_route(failed_provider, main_runtime=main_runtime):
+        return None, None, ""
     try:
         from hermes_cli.config import load_config_readonly
         from hermes_cli.fallback_config import get_fallback_chain
@@ -4511,7 +4531,7 @@ def _try_main_fallback_chain(
             tried.append(f"{label} (unhealthy)")
             continue
         try:
-            fb_client, resolved_model = _resolve_fallback_entry(entry)
+            fb_client, resolved_model = _resolve_fallback_entry(entry, main_runtime=main_runtime)
         except Exception as exc:
             logger.debug("Auxiliary %s: main fallback %s failed to resolve: %s", task or "call", label, exc)
             fb_client, resolved_model = None, None
@@ -4679,13 +4699,17 @@ def _resolve_auto_route(
     routed = _try_main_provider_route(main_provider, main_model, base_url, api_key, api_mode)
     if routed is not None:
         return routed
+    from hermes_cli.route_pin import provider_pins_route
+
+    if provider_pins_route(main_provider):
+        return None, None, ""
     if task:
         fb_client, fb_model, fb_label = _try_configured_fallback_chain(
-            task, main_provider or "auto", reason="main provider unavailable")
+            task, main_provider or "auto", reason="main provider unavailable", main_runtime=runtime)
         if fb_client is not None:
             return fb_client, fb_model, _fallback_provider_from_label(fb_label)
     fb_client, fb_model, fb_label = _try_main_fallback_chain(
-        task, main_provider or "auto", reason="main provider unavailable")
+        task, main_provider or "auto", reason="main provider unavailable", main_runtime=runtime)
     if fb_client is not None:
         return fb_client, fb_model, fb_label
     if not _discovery_chain_allowed(main_provider, task):
@@ -4987,6 +5011,8 @@ def _resolve_auto_branch(req: _ResolveRequest) -> _ResolveResult:
     client, resolved, effective_provider = _resolve_auto_route(main_runtime=req.main_runtime, task=req.task)
     if client is None:
         return None, None
+    from hermes_cli.route_pin import validate_selection
+    validate_selection(effective_provider, req.model or resolved, req.explicit_base_url)
     model = req.model
     # An OpenRouter-format model override won't work on a non-OpenRouter provider (e.g. local
     # server); drop it for the provider's default.
@@ -5241,30 +5267,6 @@ def _resolve_azure_foundry_branch(req: _ResolveRequest) -> _ResolveResult:
                           "runtime resolution failed (run: hermes doctor for diagnostics)")
 
 
-def _api_key_profile_supplied_client(provider: str, **client_kwargs: Any) -> Any | None:
-    """Registered profile's own client for an ``api_key`` aux route, or ``None``.
-
-    Same registration seam as ``agent_runtime_helpers._provider_supplied_client`` (main agent)
-    and the ``external_process`` branch below: a profile whose wire protocol is not
-    OpenAI-over-HTTP overrides ``ProviderProfile.create_client()`` to supply its transport.
-    A profile that raises is logged and skipped — a third-party plugin can only fail to
-    provide a client, never take the auxiliary resolution down."""
-    try:
-        from providers import get_provider_profile
-        profile = get_provider_profile(provider)
-    except Exception:
-        return None
-    if profile is None:
-        return None
-    try:
-        return profile.create_client(**client_kwargs)
-    except Exception:
-        logger.warning("resolve_provider_client: provider profile %r failed to create an "
-                       "auxiliary client; falling back to the standard client path",
-                       provider, exc_info=True)
-        return None
-
-
 def _resolve_api_key_branch(req: _ResolveRequest, pconfig: Any, resolve_creds: Callable) -> _ResolveResult:
     """PROVIDER_REGISTRY ``api_key`` providers (Anthropic via its own resolver), honouring explicit overrides."""
     provider = req.provider
@@ -5300,6 +5302,7 @@ def _resolve_api_key_branch(req: _ResolveRequest, pconfig: Any, resolve_creds: C
         base_url = _to_openai_base_url(req.explicit_base_url.strip().rstrip("/"))
     final_model = _normalize_resolved_model(req.model or _get_aux_model_for_provider(provider), provider)
     # Consulted before the built-in gemini/OpenAI ladder so a registered native transport wins (#112384).
+    from agent.provider_client_factory import _api_key_profile_supplied_client
     profile_client = _api_key_profile_supplied_client(provider, api_key=api_key, base_url=base_url)
     if profile_client is not None:
         logger.debug("resolve_provider_client: %s native client from provider profile (%s)", provider, final_model)
@@ -5328,46 +5331,6 @@ def _resolve_api_key_branch(req: _ResolveRequest, pconfig: Any, resolve_creds: C
     return _route_client(req, client, final_model)
 
 
-def _resolve_external_process_branch(req: _ResolveRequest, creds: dict[str, Any]) -> _ResolveResult:
-    """PROVIDER_REGISTRY ``external_process`` providers, served via their registered profile."""
-    provider = req.provider
-    final_model = _normalize_resolved_model(
-        req.model or (req.main_runtime.get("model") if req.main_runtime else None) or _read_main_model_for_aux(),
-        provider,
-    )
-    # Keyed on the registered profile, not a provider name, so an out-of-tree ACP provider reaches
-    # the auxiliary path (compression, vision, background review) exactly like the in-tree one.
-    try:
-        from providers import get_provider_profile as _get_provider_profile
-        _extproc_profile = _get_provider_profile(provider)
-    except Exception:
-        _extproc_profile = None
-    if _extproc_profile is not None:
-        api_key = str(creds.get("api_key", "")).strip()
-        base_url = str(creds.get("base_url", "")).strip()
-        if not final_model:
-            logger.warning("resolve_provider_client: %s requested but no model was provided or configured", provider)
-            return None, None
-        if not api_key or not base_url:
-            logger.warning("resolve_provider_client: %s requested but external process credentials are incomplete", provider)
-            return None, None
-        try:
-            client = _extproc_profile.create_client(
-                api_key=api_key, base_url=base_url,
-                command=str(creds.get("command", "")).strip() or None, args=list(creds.get("args") or []))
-        except Exception:
-            logger.warning("resolve_provider_client: profile %r failed to create an external-process client",
-                           provider, exc_info=True)
-            client = None
-        if client is not None:
-            logger.debug("resolve_provider_client: %s (%s)", provider, final_model)
-            return _route_client(req, client, final_model)
-    _log_once_debug(_LOGGED_UNSUPPORTED_EXTPROC_KEYS, provider,
-                    "resolve_provider_client: external-process provider %s not "
-                    "directly supported", provider)
-    return None, None
-
-
 def _resolve_registry_branch(req: _ResolveRequest) -> _ResolveResult:
     """PROVIDER_REGISTRY providers, dispatched on ``auth_type``; unknown providers log once."""
     provider = req.provider
@@ -5388,6 +5351,7 @@ def _resolve_registry_branch(req: _ResolveRequest) -> _ResolveResult:
     if auth_type == "api_key":
         return _resolve_api_key_branch(req, pconfig, resolve_api_key_provider_credentials)
     if auth_type == "external_process":
+        from agent.provider_client_factory import _resolve_external_process_branch
         return _resolve_external_process_branch(req, resolve_external_process_provider_credentials(provider))
     from agent.auxiliary_client_registry import REGISTRY_AUTHTYPE_ARMS
     arm = REGISTRY_AUTHTYPE_ARMS.get(auth_type)
@@ -5429,6 +5393,10 @@ def resolve_provider_client(
     # (e.g. "kimi" → "kimi-coding") is still reachable via the named-custom branch.
     original_provider = (provider or "").strip().lower()
     provider = _normalize_aux_provider(provider)
+    from hermes_cli.route_pin import provider_pins_route, validate_selection
+    if provider_pins_route(provider):
+        model = model or _normalize_main_runtime(main_runtime).get("model")
+        validate_selection(provider, model, explicit_base_url)
     api_mode = _canonical_api_mode(str(api_mode or "")).lower() or None
     # MoA chokepoint: "moa" is not an HTTP provider; resolve to the aggregator so direct callers don't
     # dead-end in unknown-provider. Unresolvable preset → leave untouched for the normal diagnostic.
@@ -5600,9 +5568,10 @@ def _vision_main_provider_client(
     resolved_api_mode: Optional[str],
 ) -> tuple[Optional[Any], Optional[str]]:
     """Auto-detect step 1: try the main provider; (None, None) falls through to the aggregator chain."""
-    # A provider vision default (static override or catalog discovery) is a *known* multimodal
-    # model; the pinned chat model usually isn't, so only fall back to it when no default exists.
-    provider_vision_default = _resolve_provider_vision_default(main_provider)
+    # Ordinary routes may use a known multimodal default; explicit pins keep the selected model.
+    from agent.auxiliary_route_pin import vision_model_default
+    provider_vision_default = vision_model_default(
+        main_provider, main_model, resolved_model, main_runtime=runtime)
     vision_model = provider_vision_default or main_model
     if main_provider == "nous":
         # Nous picks its vision model from Portal tier-aware slots inside _try_nous(vision=True);
@@ -5661,6 +5630,9 @@ def _vision_auto_route(
         client, default_model = _vision_main_provider_client(main_provider, main_model, runtime, resolved_model, resolved_api_mode)
         if client is not None:
             return _finalize_vision_client(main_provider, client, default_model, resolved_model, async_mode)
+    from agent.auxiliary_route_pin import recovery_pins_route
+    if recovery_pins_route("auto", main_runtime=runtime):
+        return None, None, None
     # Aggregators use their dedicated vision model, not the user's main model.
     for candidate in _VISION_AUTO_PROVIDER_ORDER:
         if candidate == main_provider:
@@ -6100,7 +6072,11 @@ def _unwrap_moa_provider(prov: str, mdl: Optional[str]) -> tuple[str, Optional[s
 
 def _preserve_provider_with_base_url(prov: Optional[str]) -> bool:
     """True when a first-class provider keeps its identity alongside an explicit base_url."""
+    from hermes_cli.route_pin import provider_pins_route
+
     normalized = str(prov or "").strip().lower()
+    if provider_pins_route(normalized):
+        return True  # Keep the registered identity so validate_selection can reject a foreign endpoint.
     if normalized in {"", "auto", "custom"} or normalized.startswith("custom:"):
         return False
     if normalized in _LOCAL_SERVER_ALIASES:
@@ -6229,7 +6205,10 @@ def _resolve_task_provider_model(
     if provider:
         return provider, resolved_model, base_url, api_key, resolved_api_mode
     if cfg_base_url and cfg_api_key:
-        kept = cfg_provider if str(cfg_provider or "").strip().lower() in _LOCAL_SERVER_ALIASES else "custom"
+        from hermes_cli.route_pin import provider_pins_route
+
+        kept = cfg_provider if (provider_pins_route(cfg_provider)
+                                or str(cfg_provider or "").strip().lower() in _LOCAL_SERVER_ALIASES) else "custom"
         return kept, resolved_model, cfg_base_url, cfg_api_key, resolved_api_mode
     if cfg_base_url and cfg_provider and cfg_provider != "auto":
         # base_url without api_key: keep the provider so it can resolve credentials from env
@@ -7393,6 +7372,7 @@ def _resolve_call_client(
 ) -> _ResolvedAuxRoute:
     """Resolve the client for one aux call: vision chain, or cached text client with the
     explicit-provider fallback_chain / auto-chain rescue; RuntimeError when nothing is configured."""
+    from agent.auxiliary_route_pin import recovery_pins_route
     effective_provider = resolved_provider
     if task == "vision":
         effective_provider, client, final_model = resolve_vision_provider_client(
@@ -7400,7 +7380,8 @@ def _resolve_call_client(
             model=resolved_model or model, base_url=resolved_base_url or base_url,
             api_key=resolved_api_key or api_key, async_mode=async_mode, main_runtime=main_runtime,
         )
-        if client is None and resolved_provider != "auto" and not resolved_base_url:
+        if (client is None and resolved_provider != "auto" and not resolved_base_url
+                and not recovery_pins_route(resolved_provider, main_runtime=main_runtime)):
             logger.warning("Vision provider %s unavailable, falling back to auto vision backends",
                            resolved_provider)
             effective_provider, client, final_model = resolve_vision_provider_client(
@@ -7415,12 +7396,14 @@ def _resolve_call_client(
             task=task)
         effective_provider = _effective_provider_for_client(client, resolved_provider)
         if client is None:
+            if recovery_pins_route(resolved_provider, main_runtime=main_runtime):
+                raise AuxiliaryClientUnavailable(f"Pinned provider {resolved_provider!r} unavailable; no fallback was tried")
             # Explicit provider with no credentials: honor the task fallback_chain before
             # raising (fallback entries may use OAuth / credential-pool auth).
             _explicit = (resolved_provider or "").strip().lower()
             if _explicit and _explicit not in {"auto", "openrouter", "custom"}:
                 fb_client, fb_model, fb_label = _try_configured_fallback_for_unavailable_client(
-                    task, _explicit)
+                    task, _explicit, main_runtime=main_runtime)
                 if fb_client is None:
                     nous_detail = nous_credential_failure_detail() if _explicit == "nous" else None
                     raise AuxiliaryClientUnavailable(
@@ -7742,8 +7725,10 @@ def _ladder_nous_rungs(
 def _ladder_credential_rungs(
     first_err: Exception, route: _LadderRoute, kwargs: dict[str, Any], client_is_nous: bool,
 ):
-    """OAuth credential refresh + same-provider retry, then credential-pool rotation.
-    Returns ``(response, None)`` or ``(None, first_err)`` to fall through."""
+    """A pinned request cannot authorize credential-changing recovery by merely failing."""
+    from agent.auxiliary_route_pin import recovery_pins_route
+    if recovery_pins_route(route.resolved_provider, main_runtime=route.main_runtime, client=route.client):
+        return None, first_err
     client, task, tag, resolved_provider = route.client, route.task, route.tag, route.resolved_provider
     auth_refresh_provider = _auth_refresh_provider_for_route(
         resolved_provider, route.base_info, _effective_provider_for_client(client, ""))
@@ -7785,7 +7770,8 @@ def _ladder_credential_rungs(
                 _LadderStep("call", (client, kwargs)), _credential_rung_accepts)
             if recovery_err is None:
                 return resp, None
-        if _recover_provider_pool(pool_provider, recovery_err, failed_api_key=_client_api_key):
+        if _recover_provider_pool(
+                pool_provider, recovery_err, failed_api_key=_client_api_key, main_runtime=route.main_runtime):
             logger.info("Auxiliary %s%s: recovered %s via credential-pool rotation after %s",
                         task or "call", tag, pool_provider, type(recovery_err).__name__)
             try:
@@ -7796,7 +7782,7 @@ def _ladder_credential_rungs(
                 # then fall through to the provider fallback.
                 if (_is_payment_error(retry2_err) or _is_auth_error(retry2_err)
                         or _is_rate_limit_error(retry2_err)):
-                    _recover_provider_pool(pool_provider, retry2_err)
+                    _recover_provider_pool(pool_provider, retry2_err, main_runtime=route.main_runtime)
                     first_err = retry2_err
                 else:
                     raise
@@ -7814,13 +7800,13 @@ def _next_fallback_after_quarantine(
     reason = "fallback candidate unavailable"
     fb = _try_configured_fallback_chain(
         task, resolved_provider or "auto", reason=reason, failed_model=failed_model,
-        failed_base_url=route.base_info, failure_scope=failure_scope)
+        failed_base_url=route.base_info, failure_scope=failure_scope, main_runtime=route.main_runtime)
     if task_chain_only:
         return fb
     if fb[0] is None and is_auto:
         fb = _try_main_fallback_chain(
             task, resolved_provider or "auto", reason=reason, failed_model=failed_model,
-            failed_base_url=route.base_info, failure_scope=failure_scope)
+            failed_base_url=route.base_info, failure_scope=failure_scope, main_runtime=route.main_runtime)
     if fb[0] is None:
         fb = _try_payment_fallback(
             resolved_provider, task, reason=reason, failed_base_url=route.base_info,
@@ -7829,19 +7815,12 @@ def _next_fallback_after_quarantine(
 
 
 def _ladder_provider_fallback(first_err: Exception, route: _LadderRoute):
-    """Last rung: other providers (per-task chain; then auto: main fallback chain + discovery
-    chain, explicit: main-agent-model net). Returns the response or None.
-    Capacity errors (payment/quota, connection, exhausted 429, model incompatible, malformed
-    response) bypass the explicit-provider gate — the provider cannot serve this request
-    regardless of user intent. Auth errors from an explicit provider may only use the task's
-    own configured fallback_chain; they never imply an unconfigured provider hop."""
+    """Gate automatic substitutions before the legacy task/main capacity-fallback rules."""
+    from agent.auxiliary_route_pin import recovery_pins_route
+    if recovery_pins_route(route.resolved_provider, main_runtime=route.main_runtime, client=route.client):
+        return None
     task, tag, resolved_provider = route.task, route.tag, route.resolved_provider
-    # Respect explicit provider choice for transient errors (auth, request validation, etc.) but allow
-    # fallback when the provider clearly cannot serve the request due to capacity: payment/quota exhaustion
-    # and connection failures are capacity problems, not request constraints. See #26803: daily token quota
-    # (429 + "too many tokens per day") must fall back just like a 402 credit error.
-    # Rate limits are included: after retries are exhausted, a 429 means the provider is at capacity. See
-    # #52228. See #26803: daily token quota must fall back like a 402 credit error.
+    # Ordinary providers retain the existing capacity/auth fallback authorization below.
     is_auto = resolved_provider in {"auto", "", None}
     reason = next((label for predicate, label in _FALLBACK_REASONS if predicate(first_err)), None)
     is_capacity_error = any(
@@ -7882,11 +7861,11 @@ def _ladder_provider_fallback(first_err: Exception, route: _LadderRoute):
     )
     fb_client, fb_model, fb_label = _try_configured_fallback_chain(
         task, resolved_provider or "auto", reason=reason, failed_model=_chain_failed_model,
-        failed_base_url=route.base_info, failure_scope=_chain_failure_scope)
+        failed_base_url=route.base_info, failure_scope=_chain_failure_scope, main_runtime=route.main_runtime)
     if fb_client is None and is_auto:
         fb_client, fb_model, fb_label = _try_main_fallback_chain(
             task, resolved_provider or "auto", reason=reason, failed_model=_chain_failed_model,
-            failed_base_url=route.base_info, failure_scope=_chain_failure_scope)
+            failed_base_url=route.base_info, failure_scope=_chain_failure_scope, main_runtime=route.main_runtime)
         if fb_client is None:
             fb_client, fb_model, fb_label = _try_payment_fallback(
                 resolved_provider, task, reason=reason, failed_base_url=route.base_info,
@@ -7894,7 +7873,7 @@ def _ladder_provider_fallback(first_err: Exception, route: _LadderRoute):
     elif fb_client is None and not explicit_auth_with_task_chain:
         fb_client, fb_model, fb_label = _try_main_agent_model_fallback(
             resolved_provider, task, reason=reason, failed_model=_chain_failed_model,
-            failed_base_url=route.base_info, failure_scope=_chain_failure_scope)
+            failed_base_url=route.base_info, failure_scope=_chain_failure_scope, main_runtime=route.main_runtime)
     # Ordered walk: a candidate that returns None was quarantined (dead credential or a capacity
     # error such as a quota 429) and is now unhealthy, so re-walking the CONFIGURED chains first
     # lands on the next entry, then discovery where the selection policy allows it (#106367).

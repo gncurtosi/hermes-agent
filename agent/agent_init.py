@@ -42,7 +42,7 @@ from agent.tool_guardrails import (
     ToolCallGuardrailConfig, ToolCallGuardrailController
 )
 from hermes_cli.config import DEFAULT_CONFIG, cfg_get
-from hermes_cli.route_identity import normalize_route_base_url
+from hermes_cli.route_identity import active_route_url, normalize_route_base_url
 from hermes_cli.timeouts import get_provider_request_timeout
 from hermes_constants import get_hermes_home
 from hermes_state_ids import new_session_id
@@ -871,7 +871,9 @@ def _routed_client_kwargs(agent, fallback_model, _provider_timeout) -> Optional[
     # #17929.
     _explicit = (agent.provider or "").strip().lower()
     _refused_entries = []
-    for _fb in _fallback_entries(fallback_model):
+    from hermes_cli.route_pin import provider_pins_route
+
+    for _fb in ([] if provider_pins_route(_explicit) else _fallback_entries(fallback_model)):
         _fb_provider = str(_fb["provider"])
         try:
             from hermes_cli.fallback_config import resolve_entry_api_key
@@ -1692,18 +1694,6 @@ def _configured_default_base_url(_agent_cfg, _model_cfg, _custom_providers) -> s
     return _configured_base_url
 
 
-def _active_route_url(agent, base_url) -> str:
-    """The runtime route, keeping the requested URL's query string when it is the same route."""
-    _active = str(agent.base_url or "")
-    _requested = str(base_url or "")
-    if "?" in _requested.split("#", 1)[0]:
-        with suppress(TypeError, ValueError):
-            _without_query = urlunparse(urlparse(_requested)._replace(query=""))
-            if normalize_route_base_url(_without_query) == normalize_route_base_url(_active):
-                _active = _requested
-    return normalize_route_base_url(_active)
-
-
 def _scope_context_length_to_default_runtime(
     agent, _agent_cfg, _model_cfg, _custom_providers, _config_context_length, base_url
 ) -> Optional[int]:
@@ -1728,7 +1718,7 @@ def _scope_context_length_to_default_runtime(
             )
             _active_runtime_model = normalize_model_for_provider(agent.model, agent.provider)
     _configured_base_url = _configured_default_base_url(_agent_cfg, _model_cfg, _custom_providers)
-    _active_base_url = _active_route_url(agent, base_url)
+    _active_base_url = active_route_url(agent.base_url, base_url)
     _route_mismatch = _context_route_mismatch(
         _configured_base_url, _active_base_url, str(_model_cfg.get("provider") or "").strip(),
         agent.provider, already_normalized=True,
@@ -2324,6 +2314,9 @@ def init_agent(
         if isinstance(requested_provider, str) and requested_provider.strip()
         else agent.provider
     )
+    from hermes_cli.route_pin import validate_selection
+
+    validate_selection(agent.requested_provider, model, base_url)
     agent.capabilities = {
         key: value for key, value in (capabilities or {}).items()
         if isinstance(key, str) and isinstance(value, bool)

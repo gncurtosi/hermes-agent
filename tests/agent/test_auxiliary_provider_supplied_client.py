@@ -3,7 +3,7 @@
 ``resolve_provider_client()``'s ``api_key`` branch used to build ``openai.OpenAI`` directly,
 so an out-of-tree provider registered with ``auth_type="api_key"`` lost its native transport
 for auxiliary tasks even though the main-agent path
-(``agent_runtime_helpers._provider_supplied_client``) honors the same hook (#112384).
+(``provider_client_factory._provider_supplied_client``) honors the same hook (#112384).
 These tests pin the seam through the real resolution entry point: the native client
 (sync + async), and the fall-through to the standard client for ordinary providers and
 for a broken plugin.

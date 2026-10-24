@@ -27,6 +27,10 @@ def _init_fallback_chain(agent, fallback_model):
 
     # Ordered backups tried when the primary is exhausted (legacy single-dict or list).
     agent._fallback_chain = _fallback_entries(fallback_model)
+    from hermes_cli.route_pin import provider_pins_route
+
+    if provider_pins_route(agent.provider):
+        agent._fallback_chain = []
     agent._fallback_index = 0
     agent._fallback_activated = getattr(agent, "_fallback_activated", False)
     # Legacy attribute kept for backward compat (tests, external callers)

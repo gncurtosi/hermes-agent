@@ -1058,6 +1058,11 @@ def resolve_runtime_provider(*, requested: Optional[str] = None, explicit_api_ke
     OpenCode Zen/Go where different models route through different API surfaces)."""
     requested_provider = resolve_requested_provider(requested)
     _raise_if_provider_disabled(requested_provider)
+    from hermes_cli.route_pin import pinned_profile, validate_selection
+
+    if pinned_profile(requested_provider) is not None and requested in (None, "auto") and target_model is None:
+        target_model = _effective_model(_get_model_config(), target_model)
+    validate_selection(requested_provider, target_model, explicit_base_url)
     # Same alias expansion the auxiliary client applies, so ``provider: openai`` means one thing on
     # every path (background review, curator, MoA slots, delegation) instead of "Unknown provider".
     # The pre-expansion name is what the codex_app_server overlay judges: ``openai`` is eligible,
@@ -1066,6 +1071,14 @@ def resolve_runtime_provider(*, requested: Optional[str] = None, explicit_api_ke
     requested_provider, explicit_base_url = expand_direct_api_alias(requested_provider, explicit_base_url)
     _raise_if_local_alias_missing_endpoint(requested_provider, explicit_base_url)
     runtime = next(r for r in _ladder_rungs(requested_provider, explicit_api_key, explicit_base_url, target_model) if r)
+    from hermes_cli.route_pin import pinned_profile
+
+    pinned = pinned_profile(requested_provider)
+    if pinned is not None:
+        selected = pinned_profile(runtime.get("provider"))
+        if selected is None or selected.name != pinned.name:
+            raise ValueError(f"Provider {pinned.name!r} resolved a different route; refusing substitution")
+        validate_selection(pinned.name, target_model, runtime.get("base_url"))
     _raise_for_credentialless_bare_custom(requested_provider, runtime)
     # model.openai_runtime is applied ONCE, after the ladder: every rung (pool, OAuth store,
     # explicit --api-key/--base-url, env key) hardcodes the wire api_mode for openai/openai-codex,
@@ -1168,6 +1181,10 @@ def resolve_runtime_with_fallback(config: Optional[dict[str, Any]], *, requested
         return resolve_runtime_provider(requested=requested, target_model=target_model,
                                         explicit_base_url=explicit_base_url, explicit_api_key=explicit_api_key), None
     except AuthError as primary_exc:
+        from hermes_cli.route_pin import effective_provider_pins_route, provider_pins_route
+
+        if effective_provider_pins_route(requested) or provider_pins_route(primary_exc.provider):
+            raise
         from hermes_cli.fallback_config import effective_runtime_provider, get_fallback_chain, resolve_entry_api_key
         for entry in get_fallback_chain(config):
             provider = (entry.get("provider") or "").strip().lower()

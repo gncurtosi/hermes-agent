@@ -1819,29 +1819,6 @@ def _is_anthropic_wire_url(url: str) -> bool:
     return host_mandated_api_mode(url) == "anthropic_messages"
 
 
-def _fallback_api_mode_hint(fb: dict, fb_provider: str, fb_base_url_hint: Optional[str]) -> tuple[bool, str]:
-    """(explicit, api_mode) for a fallback entry from its ORIGINAL base_url: resolve_provider_client()
-    rewrites a dual-surface /anthropic base to /v1, losing the Anthropic wire signal. An explicit
-    ``api_mode`` always wins (even "chat_completions") and suppresses later re-detection;
-    ``provider: anthropic`` without a base_url still resolves to anthropic_messages."""
-    from hermes_cli.runtime_provider import _get_named_custom_provider, _parse_api_mode
-    # Entries accept the same ``api_mode`` / ``transport`` spellings as ``providers.<name>``.
-    explicit = _parse_api_mode(fb.get("api_mode") or fb.get("transport"))
-    if explicit:
-        return True, explicit
-    # A named ``providers.<name>`` block declares its wire once (``api_mode``/``transport``); a
-    # fallback entry naming that provider inherits it instead of being re-detected from the host
-    # (#33062, #81932: an Anthropic-Messages or Responses-only relay on a plain host was downgraded
-    # to chat_completions while resolve_provider_client had already built the declared client).
-    if fb_provider and fb_provider not in {"custom", "moa"}:
-        declared = (_get_named_custom_provider(fb_provider) or {}).get("api_mode")
-        if declared:
-            return True, declared
-    if fb_provider == "anthropic" or (fb_base_url_hint and _is_anthropic_wire_url(fb_base_url_hint)):
-        return False, "anthropic_messages"
-    return False, "chat_completions"
-
-
 def _fallback_api_mode_resolved(agent, fb_provider: str, fb_model: str, fb_base_url: str) -> str:
     """Re-detect api_mode from provider / resolved base URL / model when the hint pass
     landed on the chat_completions default (never called for an explicit api_mode)."""
@@ -2056,6 +2033,12 @@ def try_activate_fallback(agent, reason: FailoverReason | None = None, reset_at=
     model slug and provider in place so the retry loop continues on the new backend; client
     construction goes through resolve_provider_client (no duplicated provider→key mappings)."""
     from agent.fallback_cooldown import _arm_rate_limit_cooldown, switch_deferred_by_reset
+    from hermes_cli.route_pin import provider_pins_route
+
+    if provider_pins_route(agent.provider):
+        agent._fallback_chain = []
+        agent._fallback_model = None
+        return False
     if switch_deferred_by_reset(agent, reason, reset_at):
         return False
     cooldown_seconds = _arm_rate_limit_cooldown(agent, reason, reset_at=reset_at)

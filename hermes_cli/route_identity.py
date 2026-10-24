@@ -44,6 +44,21 @@ def normalize_route_base_url(base_url: Any) -> str:
     return normalized
 
 
+def active_route_url(base_url: Any, requested_base_url: Any) -> str:
+    """Keep a requested query string when it belongs to the active endpoint."""
+    from contextlib import suppress
+    from urllib.parse import urlparse, urlunparse
+
+    active = str(base_url or "")
+    requested = str(requested_base_url or "")
+    if "?" in requested.split("#", 1)[0]:
+        with suppress(TypeError, ValueError):
+            without_query = urlunparse(urlparse(requested)._replace(query=""))
+            if normalize_route_base_url(without_query) == normalize_route_base_url(active):
+                active = requested
+    return normalize_route_base_url(active)
+
+
 def provider_owns_route(provider: Any, base_url: Any, config: Any = None) -> Optional[bool]:
     """Whether ``model.base_url`` is *provider*'s own endpoint.
 

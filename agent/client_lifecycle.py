@@ -974,6 +974,10 @@ class ClientLifecycleMixin:
         """Adopt *entry* as the live credential. Returns False, changing nothing, when the entry's
         route cannot serve this conversation's model (a conversation's model is never rewritten by a
         rotation; the caller treats a refused swap as "no entry")."""
+        from hermes_cli.route_pin import provider_pins_route
+
+        if provider_pins_route(self.provider):
+            return False
         runtime_key = getattr(entry, "runtime_api_key", None) or getattr(entry, "access_token", "")
         runtime_base = getattr(entry, "runtime_base_url", None) or getattr(entry, "base_url", None) or self.base_url
         from hermes_cli.providers import is_actual_route

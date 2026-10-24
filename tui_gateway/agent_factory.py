@@ -512,6 +512,10 @@ def _resolve_runtime_with_fallback(resolve_kwargs: dict | None = None) -> _Runti
     try:
         return _RuntimeFallbackResolution(resolve_runtime_provider(**(resolve_kwargs or {})), None, False)
     except AuthError as primary_exc:
+        from hermes_cli.route_pin import effective_provider_pins_route, provider_pins_route
+
+        if effective_provider_pins_route((resolve_kwargs or {}).get("requested")) or provider_pins_route(primary_exc.provider):
+            raise
         for entry in _load_fallback_model() or []:
             fb_provider = str(entry.get("provider") or "").strip() if isinstance(entry, dict) else ""
             fb_model = str(entry.get("model") or "").strip() if isinstance(entry, dict) else ""

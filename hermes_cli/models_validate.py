@@ -796,6 +796,15 @@ def validate_requested_model(
     normalized = _m.normalize_provider(provider)
     if normalized == "openrouter" and base_url and not base_url_host_matches(base_url, "openrouter.ai"):
         normalized = "custom"
+    from hermes_cli.route_pin import policy_profile, validate_selection
+
+    profile = policy_profile(normalized)
+    if profile is not None and profile.strict_catalog:
+        try:
+            validate_selection(normalized, requested, base_url)
+        except (RuntimeError, ValueError) as error:
+            return _reject(str(error))
+        return _accept()
     lookup = requested
     if normalized == "copilot":
         lookup = _m.normalize_copilot_model_id(requested, api_key=api_key) or requested

@@ -77,7 +77,7 @@ def test_an_out_of_tree_profile_supplies_the_client_through_create_openai_client
 
 
 def test_a_broken_plugin_falls_through_instead_of_taking_the_turn_down(registered):
-    from agent.agent_runtime_helpers import _provider_supplied_client
+    from agent.provider_client_factory import _provider_supplied_client
 
     registered(_ExplodingProfile(name="seam-boom", base_url="acp://seam-boom"))
     assert _provider_supplied_client(_agent("seam-boom"), {"api_key": "k"}) is None

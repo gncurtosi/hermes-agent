@@ -1982,15 +1982,6 @@ def _lower_threshold_to_aux_context(
     )
 
 
-def _aux_inherits_main_route(agent: Any, aux_model: str, aux_base_url: str) -> bool:
-    """True when the auxiliary compression client is the main model on the main endpoint."""
-    from hermes_cli.route_identity import normalize_route_base_url
-    if str(aux_model or "").strip().lower() != str(getattr(agent, "model", "") or "").strip().lower():
-        return False
-    main_base = normalize_route_base_url(str(getattr(agent, "base_url", "") or ""))
-    return not main_base or normalize_route_base_url(aux_base_url) == main_base
-
-
 def check_compression_model_feasibility(agent: Any) -> None:
     """Warn at session start if the aux compression context is below the threshold.
     Called from ``AIAgent.__init__`` (CLI sees it via ``_vprint``); the gateway wires ``status_callback``
@@ -2009,10 +2000,11 @@ def check_compression_model_feasibility(agent: Any) -> None:
             _aux_cfg_provider, _, _, _, _ = _resolve_task_provider_model("compression")
         except Exception:
             _aux_cfg_provider = ""
-        client, aux_model = get_text_auxiliary_client("compression", main_runtime=agent._current_main_runtime())
+        main_runtime = agent._current_main_runtime()
+        client, aux_model = get_text_auxiliary_client("compression", main_runtime=main_runtime)
         if client is None or not aux_model:
             fb_client, fb_model, fb_label = _try_configured_fallback_for_unavailable_client(
-                "compression", _aux_cfg_provider
+                "compression", _aux_cfg_provider, main_runtime=main_runtime
             )
             if fb_client is not None and fb_model:
                 client, aux_model = fb_client, fb_model
@@ -2044,6 +2036,7 @@ def check_compression_model_feasibility(agent: Any) -> None:
             _aux_cfg_provider if _aux_cfg_provider and _aux_cfg_provider != "auto" else getattr(agent, "provider", "")
         )
         _aux_cfg_ctx = getattr(agent, "_aux_compression_context_length_config", None)
+        from agent.route_binding import _aux_inherits_main_route
         if _aux_cfg_ctx is None and _aux_inherits_main_route(agent, aux_model, aux_base_url):
             # Same model on the same route: reuse the main model's already-resolved window (which honours
             # model.context_length / provider pins). Re-resolving from scratch lost the pin and auto-lowered

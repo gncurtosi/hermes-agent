@@ -17,15 +17,19 @@ def model_override_conflict(params: dict, build_scope) -> dict | None:
     session would actually build with (profile config, then env) inside ``build_scope`` — the
     handler's ``_profile_build_scope(profile_home)`` context manager."""
     model = str(params.get("model") or "").strip()
-    if not model:
+    if not model and not params.get("provider"):
         return None
     from hermes_cli.models_validate import static_model_provider_conflict
     from hermes_cli.runtime_provider import resolve_requested_provider
+    from hermes_cli.route_pin import validate_selection
 
     provider = str(params.get("provider") or "").strip()
-    if not provider:
-        with build_scope:
-            provider = resolve_requested_provider()
+    with build_scope:
+        provider = resolve_requested_provider(provider or None)
+        try:
+            validate_selection(provider, model, params.get("base_url"))
+        except (RuntimeError, ValueError) as error:
+            return {"model": model, "provider": provider, "suggestions": [], "message": str(error)}
     return static_model_provider_conflict(model, provider)
 
 

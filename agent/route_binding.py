@@ -19,9 +19,13 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
     """Swap ``agent`` onto ``entry`` (a fallback-chain-shaped dict). Returns ``(old_model,
     old_provider)``, or None when the provider has no usable client. Sets ``_fallback_activated``
     so the next turn's ``restore_primary_runtime`` reverts it; raises on a failed swap."""
+    from hermes_cli.route_pin import provider_pins_route
+
+    if provider_pins_route(agent.provider):
+        raise ValueError("Pinned provider requires an explicit operator model/provider switch")
     from agent.auxiliary_client import resolve_provider_client
     from agent.chat_completion_helpers import (
-        _fallback_api_mode_hint, _fallback_api_mode_resolved, _rebind_fallback_credential_pool,
+        _fallback_api_mode_resolved, _rebind_fallback_credential_pool,
         _reresolve_fallback_reasoning_config, _rescope_fallback_extra_body, _update_fallback_context_compressor,
     )
     from hermes_cli.fallback_config import resolve_entry_api_key
@@ -149,3 +153,36 @@ def reinstall_primary_runtime(
     agent._fallback_activated = False
     agent._fallback_index = 0
     agent._rate_limit_backoff_count = 0
+
+
+def _fallback_api_mode_hint(fb: dict, fb_provider: str, fb_base_url_hint: Optional[str]) -> tuple[bool, str]:
+    """(explicit, api_mode) for a fallback entry from its ORIGINAL base_url: resolve_provider_client()
+    rewrites a dual-surface /anthropic base to /v1, losing the Anthropic wire signal. An explicit
+    ``api_mode`` always wins (even "chat_completions") and suppresses later re-detection;
+    ``provider: anthropic`` without a base_url still resolves to anthropic_messages."""
+    from agent.chat_completion_helpers import _is_anthropic_wire_url
+    from hermes_cli.runtime_provider import _get_named_custom_provider, _parse_api_mode
+    # Entries accept the same ``api_mode`` / ``transport`` spellings as ``providers.<name>``.
+    explicit = _parse_api_mode(fb.get("api_mode") or fb.get("transport"))
+    if explicit:
+        return True, explicit
+    # A named ``providers.<name>`` block declares its wire once (``api_mode``/``transport``); a
+    # fallback entry naming that provider inherits it instead of being re-detected from the host
+    # (#33062, #81932: an Anthropic-Messages or Responses-only relay on a plain host was downgraded
+    # to chat_completions while resolve_provider_client had already built the declared client).
+    if fb_provider and fb_provider not in {"custom", "moa"}:
+        declared = (_get_named_custom_provider(fb_provider) or {}).get("api_mode")
+        if declared:
+            return True, declared
+    if fb_provider == "anthropic" or (fb_base_url_hint and _is_anthropic_wire_url(fb_base_url_hint)):
+        return False, "anthropic_messages"
+    return False, "chat_completions"
+
+
+def _aux_inherits_main_route(agent: Any, aux_model: str, aux_base_url: str) -> bool:
+    """True when the auxiliary compression client is the main model on the main endpoint."""
+    from hermes_cli.route_identity import normalize_route_base_url
+    if str(aux_model or "").strip().lower() != str(getattr(agent, "model", "") or "").strip().lower():
+        return False
+    main_base = normalize_route_base_url(str(getattr(agent, "base_url", "") or ""))
+    return not main_base or normalize_route_base_url(aux_base_url) == main_base
