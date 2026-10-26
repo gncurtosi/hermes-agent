@@ -396,10 +396,13 @@ def finish_bind(agent, entry):
     from hermes_constants import parse_reasoning_effort
     agent.reasoning_config = parse_reasoning_effort(entry["reasoning_effort"])
     agent._credential_pool = agent._credential_pool_entry_id = None
+    route = getattr(agent, "_delegate_route", None)
+    route_label = route.get("label") if isinstance(route, dict) else None
     agent._model_map_transitions.append({
         "provider": agent.provider, "model": agent.model, "base_url": agent.base_url,
         "reason": getattr(agent, "_model_map_fallback_reason", "provider failure"),
         "reasoning_effort": entry["reasoning_effort"],
+        **({"route": route_label} if route_label else {}),
     })
 
 
@@ -411,7 +414,16 @@ def mark_tool_barrier(agent):
 
 def transition_report(agent):
     transitions = getattr(agent, "_model_map_transitions", None)
-    return {"fallback_transitions": deepcopy(transitions)} if isinstance(transitions, list) else {}
+    if not isinstance(transitions, list):
+        return {}
+    clean = []
+    for t in transitions:
+        if isinstance(t, dict):
+            clean.append({
+                k: v for k, v in t.items()
+                if not any(secret in k.lower() for secret in ("key", "token", "secret", "auth", "password"))
+            })
+    return {"fallback_transitions": clean}
 
 
 def caller_report(routing_cfg):

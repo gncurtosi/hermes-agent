@@ -1015,6 +1015,11 @@ def recover_with_credential_pool(
     usage"); ``billing_unverified`` gives the entry a short cooldown, not the one-hour bench."""
     from hermes_cli.route_pin import provider_pins_route
 
+    if getattr(agent, "_model_map_policy", None) is not None or provider_pins_route(agent.provider):
+        return False, has_retried_429
+    route = getattr(agent, "_delegate_route", None)
+    if isinstance(route, dict) and route.get("backend") == "model_map":
+        return False, has_retried_429
     if provider_pins_route(agent.provider):
         return False, has_retried_429
     pool = agent._credential_pool

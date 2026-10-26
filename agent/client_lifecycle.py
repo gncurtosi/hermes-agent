@@ -976,6 +976,11 @@ class ClientLifecycleMixin:
         rotation; the caller treats a refused swap as "no entry")."""
         from hermes_cli.route_pin import provider_pins_route
 
+        if getattr(self, "_model_map_policy", None) is not None:
+            return False
+        route = getattr(self, "_delegate_route", None)
+        if isinstance(route, dict) and route.get("backend") == "model_map":
+            return False
         if provider_pins_route(self.provider):
             return False
         runtime_key = getattr(entry, "runtime_api_key", None) or getattr(entry, "access_token", "")

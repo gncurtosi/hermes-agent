@@ -61,10 +61,15 @@ def _route_report(child: Any) -> Optional[dict[str, Any]]:
     effort = None
     if isinstance(reasoning, dict):
         effort = reasoning.get("effort") if reasoning.get("enabled", True) else "none"
-    return {**route, "provider": _str_or_none(getattr(child, "provider", None)),
+    rep = {**route, "provider": _str_or_none(getattr(child, "provider", None)),
             "model": _str_or_none(getattr(child, "model", None)), "reasoning_effort": _str_or_none(effort),
             "service_tier": service_tier_word(_tier_in_effect(child)),
             **({"fallback_activated": True} if getattr(child, "_fallback_activated", False) is True else {})}
+    from agent.delegation_fallback import transition_report
+    transitions = transition_report(child).get("fallback_transitions")
+    if transitions:
+        rep["fallback_transitions"] = transitions
+    return rep
 
 def _fabricated_entry(idx: int, status: str, error: str, child: Any, duration: float = 0) -> dict[str, Any]:
     """Result entry for a child that raised, never finished, or was abandoned."""
@@ -476,6 +481,11 @@ def _lease_child_credential(child: Any) -> tuple[Any, Optional[str]]:
     released and an endpoint-matching entry is leased by id instead (#68237). Child work, so it runs in the child's
     profile scope: a lease may refresh that profile's OAuth entries, and ``_swap_credential`` re-reads TLS/header
     config for the bound endpoint."""
+    if getattr(child, "_model_map_policy", None) is not None:
+        return None, None
+    route = getattr(child, "_delegate_route", None)
+    if isinstance(route, dict) and route.get("backend") == "model_map":
+        return None, None
     child_pool = getattr(child, "_credential_pool", None)
     if child_pool is None:
         return None, None
