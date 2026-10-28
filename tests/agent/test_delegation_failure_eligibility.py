@@ -32,6 +32,20 @@ def test_codex_app_server_classifier_opt_out_is_respected(monkeypatch):
     assert turn_recovery.activate_codex_app_server_fallback(agent, {"error": "fixture"}) is False
 
 
+def test_codex_app_server_failure_after_tools_never_replays(monkeypatch):
+    from agent import turn_recovery
+    from agent.error_classifier import ClassifiedError
+    agent = authorized_agent()
+    agent._has_pending_fallback = lambda: True
+    agent._buffer_diagnostic_status = lambda *a: None
+    agent._try_activate_fallback = lambda **kw: pytest.fail("app-server tools may already have run")
+    monkeypatch.setattr(turn_recovery, "classify_api_error", lambda *a, **kw:
+        ClassifiedError(FailoverReason.rate_limit, should_fallback=True))
+    result = {"error": "fixture", "messages": [{"role": "tool", "content": "submitted"}]}
+    assert turn_recovery.activate_codex_app_server_fallback(agent, result) is False
+    assert agent._fallback_index == 0
+
+
 def test_classifier_opt_out_cannot_be_overridden_by_model_map():
     from agent.delegation_fallback import fallback_allowed
     agent = authorized_agent()

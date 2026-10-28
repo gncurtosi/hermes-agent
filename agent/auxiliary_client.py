@@ -5072,7 +5072,13 @@ def _resolve_openai_codex_branch(req: _ResolveRequest) -> _ResolveResult:
     no_token_msg = "resolve_provider_client: openai-codex requested but no Codex OAuth token found (run: hermes model)"
     if req.raw_codex:
         # Raw OpenAI client for callers needing responses.stream() (main agent loop).
-        codex_token, base_url = _resolve_codex_credential_and_base()
+        if req.explicit_api_key is not None or req.explicit_base_url is not None:
+            codex_token = _normalize_api_key(req.explicit_api_key)
+            base_url = (req.explicit_base_url or "").strip().rstrip("/")
+            if not base_url:
+                return None, None
+        else:
+            codex_token, base_url = _resolve_codex_credential_and_base()
         if not codex_token:
             logger.warning(no_token_msg)
             return None, None

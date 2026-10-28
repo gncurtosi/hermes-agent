@@ -1754,13 +1754,19 @@ def activate_codex_app_server_fallback(agent: Any, result: dict[str, Any]) -> bo
     raising, so the generic classify -> ``fallback_providers`` chain never saw it (#71633).
     Classify that text; on a billing / rate-limit verdict activate the configured fallback and
     return True so the caller re-runs the same user turn on the generic loop."""
+    # The external app-server may have run tools before returning an error or
+    # throwing without a complete transcript. Without a trusted pre-tool proof,
+    # a model_map child must not replay the turn on another provider.
+    from agent.delegation_fallback import ModelMapPolicy
+    if isinstance(getattr(agent, "_model_map_policy", None), ModelMapPolicy):
+        return False
     error = result.get("error")
     if not error or result.get("interrupted") or not agent._has_pending_fallback():
         return False
     classified = classify_api_error(
         RuntimeError(str(error)), provider=getattr(agent, "provider", "") or "", model=getattr(agent, "model", "") or "",
     )
-    if classified.reason not in _RATE_LIMIT_REASONS:
+    if classified.reason not in _RATE_LIMIT_REASONS or not classified.should_fallback:
         return False
     agent._buffer_diagnostic_status(
         _eager_fallback_status(classified, classified.reason == FailoverReason.upstream_rate_limit, False))
