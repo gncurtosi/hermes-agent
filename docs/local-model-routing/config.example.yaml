@@ -12,44 +12,32 @@ model: gemini-3.8-flash-medium
 provider: antigravity-subscription-directsdk
 reasoning_effort: medium
 
-# Global fallbacks for the primary orchestrator (empty = fail closed)
-fallback_providers: []
+# Global fallbacks for the primary orchestrator
+fallback_providers:
+  - provider: openai-codex
+    model: gpt-6.1-terra
+  - provider: antigravity-subscription-directsdk
+    model: claude-sonnet-5-5-medium
 
 # -------------------------------------------------------------------------------
 # Auxiliary Subsystems
 # -------------------------------------------------------------------------------
 auxiliary:
   goal_judge:
-    provider: auto  # Dynamically binds to orchestrator client
+    provider: auto
+    model: gemini-3.8-flash-medium
 
 # -------------------------------------------------------------------------------
 # Delegation Subsystem
 # -------------------------------------------------------------------------------
 delegation:
   backend: model_map
-  max_concurrent_children: 10
   backends:
     model_map:
       default: fast
       options:
         # ---------------------------------------------------------------------
-        # Scientific Inquiry & Systems Architecture (Claude Pro DirectSDK)
-        # Isolated: Zero automatic fallback due to AccountBinding security boundary
-        # ---------------------------------------------------------------------
-        - name: scientific_research
-          provider: claude-subscription-directsdk-experimental
-          model: claude-opus-5-5[1m]
-          reasoning_effort: medium
-          fallback_providers: []
-
-        - name: architecture
-          provider: claude-subscription-directsdk-experimental
-          model: claude-opus-5-5[1m]
-          reasoning_effort: medium
-          fallback_providers: []
-
-        # ---------------------------------------------------------------------
-        # Routine, Fast & Triage Routes (Antigravity -> Codex Luna -> Codex Terra)
+        # 1. fast (Default Route)
         # ---------------------------------------------------------------------
         - name: fast
           provider: antigravity-subscription-directsdk
@@ -58,25 +46,13 @@ delegation:
           fallback_providers:
             - provider: openai-codex
               model: gpt-6-luna
-              reasoning_effort: medium
-            - provider: openai-codex
-              model: gpt-6.1-terra
-              reasoning_effort: medium
-
-        - name: routine
-          provider: antigravity-subscription-directsdk
-          model: gemini-3.8-flash-medium
-          reasoning_effort: medium
-          fallback_providers:
-            - provider: openai-codex
-              model: gpt-6-luna
-              reasoning_effort: medium
+              reasoning_effort: low
             - provider: openai-codex
               model: gpt-6.1-terra
               reasoning_effort: medium
 
         # ---------------------------------------------------------------------
-        # Codex Engineering Routes (Sol <-> Terra -> Antigravity Sonnet)
+        # 2. complex_code_sol
         # ---------------------------------------------------------------------
         - name: complex_code_sol
           provider: openai-codex
@@ -90,6 +66,9 @@ delegation:
               model: claude-sonnet-5-5-medium
               reasoning_effort: medium
 
+        # ---------------------------------------------------------------------
+        # 3. complex_code_terra
+        # ---------------------------------------------------------------------
         - name: complex_code_terra
           provider: openai-codex
           model: gpt-6.1-terra
@@ -102,6 +81,27 @@ delegation:
               model: claude-sonnet-5-5-medium
               reasoning_effort: medium
 
+        # ---------------------------------------------------------------------
+        # 4. scientific_research (Claude Pro DirectSDK, Isolated)
+        # ---------------------------------------------------------------------
+        - name: scientific_research
+          provider: claude-subscription-directsdk-experimental
+          model: claude-opus-5-5[1m]
+          reasoning_effort: medium
+          fallback_providers: []
+
+        # ---------------------------------------------------------------------
+        # 5. architecture (Claude Pro DirectSDK, Isolated)
+        # ---------------------------------------------------------------------
+        - name: architecture
+          provider: claude-subscription-directsdk-experimental
+          model: claude-opus-5-5[1m]
+          reasoning_effort: medium
+          fallback_providers: []
+
+        # ---------------------------------------------------------------------
+        # 6. hpc_release
+        # ---------------------------------------------------------------------
         - name: hpc_release
           provider: openai-codex
           model: gpt-6.1-terra
@@ -114,53 +114,8 @@ delegation:
               model: claude-sonnet-5-5-medium
               reasoning_effort: medium
 
-        - name: implementation
-          provider: openai-codex
-          model: gpt-6.1-terra
-          reasoning_effort: medium
-          fallback_providers:
-            - provider: openai-codex
-              model: gpt-6.1-sol
-              reasoning_effort: medium
-            - provider: antigravity-subscription-directsdk
-              model: claude-sonnet-5-5-medium
-              reasoning_effort: medium
-
-        - name: hard_debugging
-          provider: openai-codex
-          model: gpt-6.1-terra
-          reasoning_effort: medium
-          fallback_providers:
-            - provider: openai-codex
-              model: gpt-6.1-sol
-              reasoning_effort: medium
-            - provider: antigravity-subscription-directsdk
-              model: claude-sonnet-5-5-medium
-              reasoning_effort: medium
-
         # ---------------------------------------------------------------------
-        # Cross-Family Independent Review Routes
-        # ---------------------------------------------------------------------
-        - name: review_claude_author
-          provider: openai-codex
-          model: gpt-6.1-terra
-          reasoning_effort: medium
-          fallback_providers:
-            - provider: openai-codex
-              model: gpt-6.1-sol
-              reasoning_effort: medium
-            - provider: antigravity-subscription-directsdk
-              model: claude-sonnet-5-5-medium
-              reasoning_effort: medium
-
-        - name: review_openai_author
-          provider: claude-subscription-directsdk-experimental
-          model: claude-sonnet-5-5[1m]
-          reasoning_effort: medium
-          fallback_providers: []
-
-        # ---------------------------------------------------------------------
-        # Dedicated Claude Pro Subscription Routes
+        # 7-9. Dedicated Claude Pro DirectSDK Routes
         # ---------------------------------------------------------------------
         - name: claude_opus_55
           provider: claude-subscription-directsdk-experimental
@@ -181,49 +136,103 @@ delegation:
           fallback_providers: []
 
         # ---------------------------------------------------------------------
-        # High-Effort & Reserve Routes
+        # 10-11. Cross-Family Review Routes
         # ---------------------------------------------------------------------
-        - name: argon_deep
-          provider: antigravity-subscription-directsdk
-          model: gemini-4-argon-high
-          reasoning_effort: high
-          fallback_providers: []
-
-        - name: astra_heavy
-          provider: openai-codex
-          model: gpt-6-astra
-          reasoning_effort: high
-          fallback_providers: []
-
-        - name: antigravity_opus
-          provider: antigravity-subscription-directsdk
-          model: claude-opus-5-5-high
-          reasoning_effort: high
-          fallback_providers: []
-
-        - name: antigravity_sonnet
+        - name: review_openai_author
           provider: antigravity-subscription-directsdk
           model: claude-sonnet-5-5-medium
           reasoning_effort: medium
           fallback_providers: []
 
-        - name: direct_opus__high
-          provider: claude-subscription-directsdk-experimental
-          model: claude-opus-5-5[1m]
+        - name: review_claude_author
+          provider: openai-codex
+          model: gpt-6.1-terra
+          reasoning_effort: medium
+          fallback_providers: []
+
+        # ---------------------------------------------------------------------
+        # 12. orchestration
+        # ---------------------------------------------------------------------
+        - name: orchestration
+          provider: antigravity-subscription-directsdk
+          model: gemini-3.8-flash-medium
+          reasoning_effort: medium
+          fallback_providers:
+            - provider: openai-codex
+              model: gpt-6-luna
+              reasoning_effort: low
+            - provider: openai-codex
+              model: gpt-6.1-terra
+              reasoning_effort: medium
+
+        # ---------------------------------------------------------------------
+        # 13. complex_planning
+        # ---------------------------------------------------------------------
+        - name: complex_planning
+          provider: antigravity-subscription-directsdk
+          model: gemini-4-argon-high
           reasoning_effort: high
           fallback_providers: []
 
         # ---------------------------------------------------------------------
-        # Low-Effort Bounded Triage Routes
+        # 14. critical_audit
         # ---------------------------------------------------------------------
-        - name: routine__low
-          provider: antigravity-subscription-directsdk
-          model: gemini-3.8-flash-low
+        - name: critical_audit
+          provider: openai-codex
+          model: gpt-6-astra
+          reasoning_effort: high
+          fallback_providers: []
+
+        # ---------------------------------------------------------------------
+        # 15. triage
+        # ---------------------------------------------------------------------
+        - name: triage
+          provider: openai-codex
+          model: gpt-6-luna
           reasoning_effort: low
           fallback_providers: []
 
-        - name: haiku__low
-          provider: claude-subscription-directsdk-experimental
-          model: claude-haiku-5-5[1m]
-          reasoning_effort: low
+        # ---------------------------------------------------------------------
+        # 16-17. routine & maintenance
+        # ---------------------------------------------------------------------
+        - name: routine
+          provider: antigravity-subscription-directsdk
+          model: gemini-3.8-flash-medium
+          reasoning_effort: medium
+          fallback_providers: []
+
+        - name: maintenance
+          provider: antigravity-subscription-directsdk
+          model: gemini-3.8-flash-medium
+          reasoning_effort: medium
+          fallback_providers: []
+
+        # ---------------------------------------------------------------------
+        # 18. experimental_baselines
+        # ---------------------------------------------------------------------
+        - name: experimental_baselines
+          provider: antigravity-subscription-directsdk
+          model: gpt-oss-120b-medium
+          reasoning_effort: medium
+          fallback_providers: []
+
+        # ---------------------------------------------------------------------
+        # 19-21. Antigravity Dedicated Reserves
+        # ---------------------------------------------------------------------
+        - name: agy__gemini-4-argon-high
+          provider: antigravity-subscription-directsdk
+          model: gemini-4-argon-high
+          reasoning_effort: high
+          fallback_providers: []
+
+        - name: agy__claude-opus-5-5-medium
+          provider: antigravity-subscription-directsdk
+          model: claude-opus-5-5-medium
+          reasoning_effort: medium
+          fallback_providers: []
+
+        - name: agy__claude-sonnet-5-5-medium
+          provider: antigravity-subscription-directsdk
+          model: claude-sonnet-5-5-medium
+          reasoning_effort: medium
           fallback_providers: []

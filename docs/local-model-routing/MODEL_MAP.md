@@ -2,7 +2,7 @@
 
 ## 1. Catalog Architecture
 
-The native Hermes Model Map backend (`plugins/advanced-delegation/model_map.py`) exposes **21 verified named routes** configured in `~/.hermes/config.yaml`.
+The native Hermes Model Map backend (`plugins/advanced-delegation/model_map.py`) exposes **exactly 21 verified named routes** configured in `~/.hermes/config.yaml`.
 
 Each route is defined by:
 - `name`: Unique option string passed to `delegate_task(option=...)`.
@@ -17,27 +17,27 @@ Each route is defined by:
 
 | # | Route Name | Provider | Primary Model | Effort | Fallback 1 | Fallback 2 | Primary Task Purpose |
 |---|---|---|---|---|---|---|---|
-| 1 | `scientific_research` | `claude-subscription-directsdk-experimental` | `claude-opus-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Demanding physics, FEM crash, contact mechanics, GENESYS scientific inquiry |
-| 2 | `architecture` | `claude-subscription-directsdk-experimental` | `claude-opus-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | System architecture, scalability tradeoffs, model-level redesigns |
-| 3 | `fast` *(Default)* | `antigravity-subscription-directsdk` | `gemini-3.8-flash-medium` | `medium` | `openai-codex` / `gpt-6-luna` | `openai-codex` / `gpt-6.1-terra` | Default routine tasks, repository scouting, quick queries |
-| 4 | `routine` | `antigravity-subscription-directsdk` | `gemini-3.8-flash-medium` | `medium` | `openai-codex` / `gpt-6-luna` | `openai-codex` / `gpt-6.1-terra` | Lightweight coordination, triage, log summarization |
-| 5 | `complex_code_sol` | `openai-codex` | `gpt-6.1-sol` | `medium` | `openai-codex` / `gpt-6.1-terra` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | Complex algorithmic coding, deep refactoring, new feature development |
-| 6 | `complex_code_terra` | `openai-codex` | `gpt-6.1-terra` | `medium` | `openai-codex` / `gpt-6.1-sol` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | Production engineering, automation, unit/integration test suites |
-| 7 | `hpc_release` | `openai-codex` | `gpt-6.1-terra` | `medium` | `openai-codex` / `gpt-6.1-sol` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | HPC job packaging, deployment scripts, release qualification |
-| 8 | `implementation` | `openai-codex` | `gpt-6.1-terra` | `medium` | `openai-codex` / `gpt-6.1-sol` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | Routine software implementation and code fixes |
-| 9 | `hard_debugging` | `openai-codex` | `gpt-6.1-terra` | `medium` | `openai-codex` / `gpt-6.1-sol` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | Difficult numerical, DDP, memory, or concurrency bugs |
-| 10 | `review_claude_author` | `openai-codex` | `gpt-6.1-terra` | `medium` | `openai-codex` / `gpt-6.1-sol` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | Independent cross-family review of Claude-authored artifacts |
-| 11 | `review_openai_author` | `claude-subscription-directsdk-experimental` | `claude-sonnet-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Independent cross-family review of Codex-authored artifacts |
-| 12 | `claude_opus_55` | `claude-subscription-directsdk-experimental` | `claude-opus-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Dedicated Claude Pro Opus 5.5 invocation |
-| 13 | `claude_sonnet_55` | `claude-subscription-directsdk-experimental` | `claude-sonnet-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Dedicated Claude Pro Sonnet 5.5 invocation |
-| 14 | `claude_haiku_55` | `claude-subscription-directsdk-experimental` | `claude-haiku-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Dedicated Claude Pro Haiku 5.5 fast invocation |
-| 15 | `argon_deep` | `antigravity-subscription-directsdk` | `gemini-4-argon-high` | `high` | *None* (`[]`) | *None* (`[]`) | High-effort Gemini 4 Argon planning and synthesis |
-| 16 | `astra_heavy` | `openai-codex` | `gpt-6-astra` | `high` | *None* (`[]`) | *None* (`[]`) | Heavy mathematical analysis and Codex deep reasoning |
-| 17 | `antigravity_opus` | `antigravity-subscription-directsdk` | `claude-opus-5-5-high` | `high` | *None* (`[]`) | *None* (`[]`) | High-effort Antigravity Claude Opus reserve |
-| 18 | `antigravity_sonnet` | `antigravity-subscription-directsdk` | `claude-sonnet-5-5-medium` | `medium` | *None* (`[]`) | *None* (`[]`) | Medium-effort Antigravity Claude Sonnet reserve |
-| 19 | `direct_opus__high` | `claude-subscription-directsdk-experimental` | `claude-opus-5-5[1m]` | `high` | *None* (`[]`) | *None* (`[]`) | Claude Pro Opus 5.5 high-effort direct subscription |
-| 20 | `routine__low` | `antigravity-subscription-directsdk` | `gemini-3.8-flash-low` | `low` | *None* (`[]`) | *None* (`[]`) | Minimal quota usage for bounded triage |
-| 21 | `haiku__low` | `claude-subscription-directsdk-experimental` | `claude-haiku-5-5[1m]` | `low` | *None* (`[]`) | *None* (`[]`) | Low-effort Claude Pro Haiku 5.5 bounded task execution |
+| 1 | `fast` *(Default)* | `antigravity-subscription-directsdk` | `gemini-3.8-flash-medium` | `medium` | `openai-codex` / `gpt-6-luna` | `openai-codex` / `gpt-6.1-terra` | Rapid lightweight execution & default scouting |
+| 2 | `complex_code_sol` | `openai-codex` | `gpt-6.1-sol` | `medium` | `openai-codex` / `gpt-6.1-terra` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | Advanced algorithmic coding & reasoning |
+| 3 | `complex_code_terra` | `openai-codex` | `gpt-6.1-terra` | `medium` | `openai-codex` / `gpt-6.1-sol` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | Production engineering & test suite development |
+| 4 | `scientific_research` | `claude-subscription-directsdk-experimental` | `claude-opus-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Deep scientific, physics, FEM crash & mathematical research |
+| 5 | `architecture` | `claude-subscription-directsdk-experimental` | `claude-opus-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Systems & software architecture, scalability tradeoffs |
+| 6 | `hpc_release` | `openai-codex` | `gpt-6.1-terra` | `medium` | `openai-codex` / `gpt-6.1-sol` | `antigravity-subscription-directsdk` / `claude-sonnet-5-5-medium` | HPC packaging & release qualification |
+| 7 | `claude_opus_55` | `claude-subscription-directsdk-experimental` | `claude-opus-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Dedicated Claude Pro Opus 5.5 invocation (standalone) |
+| 8 | `claude_sonnet_55` | `claude-subscription-directsdk-experimental` | `claude-sonnet-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Dedicated Claude Pro Sonnet 5.5 invocation (standalone) |
+| 9 | `claude_haiku_55` | `claude-subscription-directsdk-experimental` | `claude-haiku-5-5[1m]` | `medium` | *None* (`[]`) | *None* (`[]`) | Dedicated Claude Pro Haiku 5.5 fast invocation (standalone) |
+| 10 | `review_openai_author` | `antigravity-subscription-directsdk` | `claude-sonnet-5-5-medium` | `medium` | *None* (`[]`) | *None* (`[]`) | Cross-family independent review of OpenAI artifacts |
+| 11 | `review_claude_author` | `openai-codex` | `gpt-6.1-terra` | `medium` | *None* (`[]`) | *None* (`[]`) | Cross-family independent review of Claude artifacts |
+| 12 | `orchestration` | `antigravity-subscription-directsdk` | `gemini-3.8-flash-medium` | `medium` | `openai-codex` / `gpt-6-luna` | `openai-codex` / `gpt-6.1-terra` | Mission coordination & pipeline orchestration |
+| 13 | `complex_planning` | `antigravity-subscription-directsdk` | `gemini-4-argon-high` | `high` | *None* (`[]`) | *None* (`[]`) | High-complexity architectural reasoning & planning |
+| 14 | `critical_audit` | `openai-codex` | `gpt-6-astra` | `high` | *None* (`[]`) | *None* (`[]`) | Critical code audit & deep formal verification |
+| 15 | `triage` | `openai-codex` | `gpt-6-luna` | `low` | *None* (`[]`) | *None* (`[]`) | Lightweight issue triage & bounded analysis |
+| 16 | `routine` | `antigravity-subscription-directsdk` | `gemini-3.8-flash-medium` | `medium` | *None* (`[]`) | *None* (`[]`) | Routine operations & status reporting |
+| 17 | `maintenance` | `antigravity-subscription-directsdk` | `gemini-3.8-flash-medium` | `medium` | *None* (`[]`) | *None* (`[]`) | Hermes housekeeping & environment maintenance |
+| 18 | `experimental_baselines` | `antigravity-subscription-directsdk` | `gpt-oss-120b-medium` | `medium` | *None* (`[]`) | *None* (`[]`) | Open weights benchmark baseline comparison |
+| 19 | `agy__gemini-4-argon-high` | `antigravity-subscription-directsdk` | `gemini-4-argon-high` | `high` | *None* (`[]`) | *None* (`[]`) | Dedicated Antigravity Argon High reserve |
+| 20 | `agy__claude-opus-5-5-medium` | `antigravity-subscription-directsdk` | `claude-opus-5-5-medium` | `medium` | *None* (`[]`) | *None* (`[]`) | Antigravity Claude Opus 5.5 Medium reserve |
+| 21 | `agy__claude-sonnet-5-5-medium` | `antigravity-subscription-directsdk` | `claude-sonnet-5-5-medium` | `medium` | *None* (`[]`) | *None* (`[]`) | Antigravity Claude Sonnet 5.5 Medium reserve |
 
 ---
 
@@ -46,34 +46,37 @@ Each route is defined by:
 Hermes recognizes three distinct tiers of fallback configuration:
 
 ```
-+-------------------------------------------------------------------------+
-| 1. GLOBAL FALLBACKS (config.yaml: fallback_providers)                   |
-|    Applies to the main orchestrator agent only. In production: []       |
-+-------------------------------------------------------------------------+
-                                    |
-                                    v
-+-------------------------------------------------------------------------+
-| 2. DELEGATION-LEVEL DEFAULT FALLBACKS                                   |
-|    Inherited if a delegation backend does not define its own routes.   |
-+-------------------------------------------------------------------------+
-                                    |
-                                    v
-+-------------------------------------------------------------------------+
-| 3. PER-ROUTE FALLBACKS (options[].fallback_providers)                   |
-|    Evaluated strictly per named route in model_map. Maximum depth: 2.   |
-|    Overrides global settings for that delegated subagent.               |
-+-------------------------------------------------------------------------+
++-----------------------------------------------------------------------------------------+
+| 1. GLOBAL FALLBACKS (config.yaml: fallback_providers)                                   |
+|    Applies to the main orchestrator agent only.                                         |
+|    Active configuration:                                                                |
+|      1. openai-codex / gpt-6.1-terra                                                    |
+|      2. antigravity-subscription-directsdk / claude-sonnet-5-5-medium                     |
++-----------------------------------------------------------------------------------------+
+                                             |
+                                             v
++-----------------------------------------------------------------------------------------+
+| 2. DELEGATION-LEVEL DEFAULT FALLBACKS                                                   |
+|    Inherited if a delegation backend does not define its own routes.                    |
++-----------------------------------------------------------------------------------------+
+                                             |
+                                             v
++-----------------------------------------------------------------------------------------+
+| 3. PER-ROUTE FALLBACKS (delegation.backends.model_map.options[].fallback_providers)     |
+|    Evaluated strictly per named route in model_map. Maximum depth: 2.                   |
+|    Overrides global settings for that delegated subagent.                               |
++-----------------------------------------------------------------------------------------+
 ```
 
 ### Key Invariants:
-- **Route-specific isolation**: Per-route `fallback_providers` override global fallback settings completely for that task.
+- **Route-specific isolation**: Per-route `fallback_providers` override global fallback settings completely for that delegated subagent task.
 - **Depth limit**: Native Hermes core restricts `len(fallback_providers) <= 2`. Any configuration declaring 3 or more fallback providers is rejected during validation in `prepare_model_map_route`.
 
 ---
 
 ## 4. Configured Fallback Chains
 
-### Chain A: Routine / Fast (`fast`, `routine`)
+### Chain A: Rapid Execution & Orchestration (`fast`, `orchestration`)
 ```
 [Primary: Antigravity / gemini-3.8-flash-medium] (Effort: Medium)
        |
@@ -105,7 +108,7 @@ Hermes recognizes three distinct tiers of fallback configuration:
 [Fail Closed: Account boundary preserved]
 ```
 
-### Chain C: Codex Production (`complex_code_terra`, `hpc_release`, `implementation`, `hard_debugging`, `review_claude_author`)
+### Chain C: Codex Production (`complex_code_terra`, `hpc_release`)
 ```
 [Primary: OpenAI Codex / gpt-6.1-terra] (Effort: Medium)
        |
